@@ -1,144 +1,201 @@
 package com.self.dingAlarm
 
-import android.Manifest
-import android.annotation.SuppressLint
+import androidx.appcompat.app.AppCompatActivity
+import android.os.Bundle
+import android.widget.TextView
+import android.widget.EditText
+import android.widget.Switch
+import android.widget.Button
+import android.app.TimePickerDialog
 import android.app.AlarmManager
 import android.app.PendingIntent
-import android.app.TimePickerDialog
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Build
-import android.os.Bundle
-import android.widget.Button
-import android.widget.TextView
 import android.widget.Toast
-import androidx.activity.ComponentActivity
-import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
 import java.util.Calendar
+import androidx.core.content.ContextCompat
+import android.os.Build
 
-class MainActivity : ComponentActivity() {
-    private lateinit var timeDisplay: TextView
-    private lateinit var setTimeButton: Button
-    private lateinit var alarmManager: AlarmManager
-
-    companion object {
-        private const val ALARM_REQUEST_CODE = 100
-    }
+class MainActivity : AppCompatActivity() {
+    private lateinit var morningTimeDisplay: TextView
+    private lateinit var eveningTimeDisplay: TextView
+    private lateinit var minDelayEdit: EditText
+    private lateinit var maxDelayEdit: EditText
+    private lateinit var alarmSwitch: Switch
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
-
-        timeDisplay = findViewById(R.id.timeDisplay)
-        setTimeButton = findViewById(R.id.setTimeButton)
-        alarmManager = getSystemService(ALARM_SERVICE) as AlarmManager
-
-        setTimeButton.setOnClickListener {
-            showTimePickerDialog()
-        }
-
-        updateTimeDisplay()
-    }
-
-    private fun scheduleAlarm() {
-        val time = if (CommonUtil.isAM()) CommonUtil.amTime else CommonUtil.pmTime
-        time?.let {
-            if (!checkAlarmPermission()) {
-                return
-            }
-
-            val calendar = Calendar.getInstance().apply {
-                set(Calendar.HOUR_OF_DAY, it.hour)
-                set(Calendar.MINUTE, it.minute)
-                set(Calendar.SECOND, 0)
-
-                if (timeInMillis <= System.currentTimeMillis()) {
-                    add(Calendar.DAY_OF_MONTH, 1)
-                }
-            }
-
-            val intent = Intent(this, AlarmReceiver::class.java)
-            val pendingIntent = PendingIntent.getBroadcast(
-                this,
-                ALARM_REQUEST_CODE,
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-
-            try {
-                // 使用setAlarm函数来设置闹钟
-                setAlarm(calendar.timeInMillis, pendingIntent)
-                showSuccessToast(it)
-            } catch (e: Exception) {
-                Toast.makeText(this, "设置闹钟失败：${e.message}", Toast.LENGTH_SHORT).show()
-            }
+        try {
+            setContentView(R.layout.activity_main)
+            checkPermissions()  // 添加权限检查
+            initViews()
+            loadSettings()
+            setupListeners()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(this, "启动错误：${e.message}", Toast.LENGTH_LONG).show()
         }
     }
-
-    // 处理不同版本的闹钟设置
-    @SuppressLint("NewApi")
-    private fun setAlarm(timeInMillis: Long, pendingIntent: PendingIntent) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            // Android 6.0 (API 23) 及以上使用 setExactAndAllowWhileIdle
-            alarmManager.setExactAndAllowWhileIdle(
-                AlarmManager.RTC_WAKEUP,
-                timeInMillis,
-                pendingIntent
-            )
-        } else {
-            // Android 6.0 以下使用 setExact
-            alarmManager.setExact(
-                AlarmManager.RTC_WAKEUP,
-                timeInMillis,
-                pendingIntent
-            )
-        }
-    }
-
-    private fun showSuccessToast(time: AlarmTime) {
-        Toast.makeText(
-            this,
-            "闹钟已设置：${time.hour}:${String.format("%02d", time.minute)}",
-            Toast.LENGTH_SHORT
-        ).show()
-    }
-
-    private fun checkAlarmPermission(): Boolean {
+    private fun checkPermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (!alarmManager.canScheduleExactAlarms()) {
-                startActivity(Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM))
-                return false
+            if (!hasPermission(android.Manifest.permission.SCHEDULE_EXACT_ALARM)) {
+                requestPermissions(arrayOf(android.Manifest.permission.SCHEDULE_EXACT_ALARM), 1)
             }
         }
-        return true
+    }
+    private fun hasPermission(permission: String): Boolean {
+        return ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+    }
+    private fun initViews() {
+        morningTimeDisplay = findViewById(R.id.morningTimeDisplay)
+        eveningTimeDisplay = findViewById(R.id.eveningTimeDisplay)
+        minDelayEdit = findViewById(R.id.minDelayEdit)
+        maxDelayEdit = findViewById(R.id.maxDelayEdit)
+        alarmSwitch = findViewById(R.id.alarmSwitch)
     }
 
-    private fun showTimePickerDialog() {
-        val isAM = CommonUtil.isAM()
-        TimePickerDialog(
+    private fun loadSettings() {
+        val prefs = getSharedPreferences("alarm_settings", MODE_PRIVATE)
+
+        // 加载时间设置
+        morningTimeDisplay.text = prefs.getString("morning_time", "8:30")
+        eveningTimeDisplay.text = prefs.getString("evening_time", "18:30")
+
+        // 加载延迟设置
+        minDelayEdit.setText(prefs.getInt("min_delay", 5).toString())
+        maxDelayEdit.setText(prefs.getInt("max_delay", 10).toString())
+
+        // 加载开关状态
+        alarmSwitch.isChecked = prefs.getBoolean("alarm_enabled", false)
+    }
+
+    private fun setupListeners() {
+        findViewById<Button>(R.id.setMorningTimeButton).setOnClickListener {
+            showTimePickerDialog(true)
+        }
+
+        findViewById<Button>(R.id.setEveningTimeButton).setOnClickListener {
+            showTimePickerDialog(false)
+        }
+
+        findViewById<Button>(R.id.saveSettingsButton).setOnClickListener {
+            saveSettings()
+        }
+
+        alarmSwitch.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked) {
+                scheduleAlarms()
+            } else {
+                cancelAlarms()
+            }
+            getSharedPreferences("alarm_settings", MODE_PRIVATE).edit()
+                .putBoolean("alarm_enabled", isChecked)
+                .apply()
+        }
+    }
+
+    private fun showTimePickerDialog(isMorning: Boolean) {
+        val currentTime = if (isMorning)
+            morningTimeDisplay.text.toString() else
+            eveningTimeDisplay.text.toString()
+
+        val hour = currentTime.split(":")[0].toInt()
+        val minute = currentTime.split(":")[1].toInt()
+
+        TimePickerDialog(this, { _, selectedHour, selectedMinute ->
+            val timeString = String.format("%d:%02d", selectedHour, selectedMinute)
+            if (isMorning) {
+                morningTimeDisplay.text = timeString
+            } else {
+                eveningTimeDisplay.text = timeString
+            }
+        }, hour, minute, true).show()
+    }
+
+    private fun saveSettings() {
+        val minDelay = minDelayEdit.text.toString().toIntOrNull() ?: 5
+        val maxDelay = maxDelayEdit.text.toString().toIntOrNull() ?: 240
+
+        if (minDelay > maxDelay) {
+            Toast.makeText(this, "最小延迟不能大于最大延迟", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val prefs = getSharedPreferences("alarm_settings", MODE_PRIVATE)
+        prefs.edit().apply {
+            putString("morning_time", morningTimeDisplay.text.toString())
+            putString("evening_time", eveningTimeDisplay.text.toString())
+            putInt("min_delay", minDelay)
+            putInt("max_delay", maxDelay)
+            apply()
+        }
+
+        if (alarmSwitch.isChecked) {
+            scheduleAlarms()
+        }
+
+        Toast.makeText(this, "设置已保存", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun scheduleAlarms() {
+        val morningTime = morningTimeDisplay.text.toString()
+        val eveningTime = eveningTimeDisplay.text.toString()
+
+        // 设置上班闹钟
+        setAlarm(morningTime, 1)
+        // 设置下班闹钟
+        setAlarm(eveningTime, 2)
+    }
+
+    private fun setAlarm(timeString: String, requestCode: Int) {
+        val parts = timeString.split(":")
+        val hour = parts[0].toInt()
+        val minute = parts[1].toInt()
+
+        val calendar = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, hour)
+            set(Calendar.MINUTE, minute)
+            set(Calendar.SECOND, 0)
+
+            if (timeInMillis <= System.currentTimeMillis()) {
+                add(Calendar.DAY_OF_YEAR, 1)
+            }
+        }
+
+        val alarmIntent = Intent(this, AlarmReceiver::class.java)
+        val pendingIntent = PendingIntent.getBroadcast(
             this,
-            { _, hour, minute ->
-                if (isAM) {
-                    CommonUtil.amTime = AlarmTime(hour, minute)
-                } else {
-                    CommonUtil.pmTime = AlarmTime(hour, minute)
-                }
-                updateTimeDisplay()
-                scheduleAlarm()
-            },
-            12, 0, true
-        ).show()
+            requestCode,
+            alarmIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        alarmManager.setRepeating(
+            AlarmManager.RTC_WAKEUP,
+            calendar.timeInMillis,
+            AlarmManager.INTERVAL_DAY,
+            pendingIntent
+        )
     }
 
-    private fun updateTimeDisplay() {
-        val displayText = StringBuilder("闹钟时间：\n")
-        CommonUtil.amTime?.let {
-            displayText.append("上午: ${it.hour}:${String.format("%02d", it.minute)}\n")
-        }
-        CommonUtil.pmTime?.let {
-            displayText.append("下午: ${it.hour}:${String.format("%02d", it.minute)}")
-        }
-        timeDisplay.text = displayText.toString()
+    private fun cancelAlarms() {
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val alarmIntent = Intent(this, AlarmReceiver::class.java)
+
+        // 取消上班闹钟
+        val morningPendingIntent = PendingIntent.getBroadcast(
+            this, 1, alarmIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        alarmManager.cancel(morningPendingIntent)
+
+        // 取消下班闹钟
+        val eveningPendingIntent = PendingIntent.getBroadcast(
+            this, 2, alarmIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        alarmManager.cancel(eveningPendingIntent)
     }
 }
