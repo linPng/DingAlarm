@@ -16,6 +16,9 @@ import android.widget.Toast
 import java.util.Calendar
 import androidx.core.content.ContextCompat
 import android.os.Build
+import android.util.Log
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
     private lateinit var morningTimeDisplay: TextView
@@ -157,13 +160,16 @@ class MainActivity : AppCompatActivity() {
             set(Calendar.HOUR_OF_DAY, hour)
             set(Calendar.MINUTE, minute)
             set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
 
             if (timeInMillis <= System.currentTimeMillis()) {
                 add(Calendar.DAY_OF_YEAR, 1)
             }
         }
 
-        val alarmIntent = Intent(this, AlarmReceiver::class.java)
+        val alarmIntent = Intent(this, AlarmReceiver::class.java).apply {
+            action = "com.self.dingAlarm.ALARM_TRIGGER"  // 添加这行
+        }
         val pendingIntent = PendingIntent.getBroadcast(
             this,
             requestCode,
@@ -172,12 +178,27 @@ class MainActivity : AppCompatActivity() {
         )
 
         val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+
+        // 使用 setAlarmClock 替代 setRepeating，确保准时触发
+        alarmManager.setAlarmClock(
+            AlarmManager.AlarmClockInfo(calendar.timeInMillis, pendingIntent),
+            pendingIntent
+        )
+
+        // 设置重复闹钟
         alarmManager.setRepeating(
             AlarmManager.RTC_WAKEUP,
             calendar.timeInMillis,
             AlarmManager.INTERVAL_DAY,
             pendingIntent
         )
+
+        // 显示设置成功提示
+        val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+        val timeStr = timeFormat.format(calendar.time)
+        Toast.makeText(this, "已设置闹钟：$timeStr", Toast.LENGTH_SHORT).show()
+
+        Log.d("AlarmSchedule", "设置闹钟时间：${timeFormat.format(calendar.time)}")
     }
 
     private fun cancelAlarms() {
